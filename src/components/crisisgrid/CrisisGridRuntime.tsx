@@ -23,6 +23,10 @@ type ToolRunResponse = {
 };
 
 type PublicBroadcastComponent = Extract<UiComponent, { type: "public_broadcast_panel" }>;
+type CivicGateComponent = Extract<UiComponent, { type: "civic_gate" }>;
+type ActionPlanComponent = Extract<UiComponent, { type: "action_plan_board" }>;
+type ActionPlanAction = ActionPlanComponent["props"]["actions"][number];
+type ActionPlanStatus = ActionPlanAction["status"];
 
 const cameraAssets: Record<string, { src: string; kind: "image" | "video" }> = {
   "cam-vitacura-costanera": {
@@ -67,6 +71,8 @@ export default function CrisisGridRuntime() {
   const [started, setStarted] = useState(false);
   const [bootHoldComplete, setBootHoldComplete] = useState(false);
   const [dismissedBroadcastIds, setDismissedBroadcastIds] = useState<Set<string>>(() => new Set());
+  const [handledGateActionIds, setHandledGateActionIds] = useState<Set<string>>(() => new Set());
+  const [actionStatusOverrides, setActionStatusOverrides] = useState<Record<string, ActionPlanStatus>>({});
   const timersRef = useRef<number[]>([]);
   const actionQueueRef = useRef<OrchestrationPlan["events"]>([]);
   const {
@@ -111,6 +117,8 @@ export default function CrisisGridRuntime() {
     setStarted(true);
     reset();
     setDismissedBroadcastIds(new Set());
+    setHandledGateActionIds(new Set());
+    setActionStatusOverrides({});
     timersRef.current.forEach((timer) => window.clearTimeout(timer));
     timersRef.current = [];
     actionQueueRef.current = [];
@@ -161,6 +169,13 @@ export default function CrisisGridRuntime() {
   }, [startOrchestration]);
 
   function approveGate(actionId: string) {
+    setHandledGateActionIds((current) => {
+      const next = new Set(current);
+      next.add(actionId);
+      return next;
+    });
+    setActionStatus(actionId, "done");
+
     dispatch({
       id: `evt-${actionId}-approved`,
       type: "gate.approved",
@@ -199,6 +214,68 @@ export default function CrisisGridRuntime() {
     }
 
     actionQueueRef.current = [];
+  }
+
+  function rejectGate(actionId: string) {
+    setHandledGateActionIds((current) => {
+      const next = new Set(current);
+      next.add(actionId);
+      return next;
+    });
+    setActionStatus(actionId, "queued");
+
+    dispatch({
+      id: `evt-${actionId}-held-by-operator`,
+      type: "ui.component.added",
+      timestamp: new Date().toISOString(),
+      agentId: "gatekeeper_agent",
+      component: {
+        type: "public_alert_draft",
+        props: {
+          channel: "Operator decision",
+          message:
+            "Public advisory held. CrisisGrid will continue monitoring cameras and social signals before escalation.",
+        },
+      },
+    });
+  }
+
+  function setActionStatus(actionId: string, status: ActionPlanStatus) {
+    setActionStatusOverrides((current) => ({
+      ...current,
+      [actionId]: status,
+    }));
+  }
+
+  function handleActionPlanAction(action: ActionPlanAction) {
+    if (action.status === "done") {
+      return;
+    }
+
+    if (action.status === "needs_approval") {
+      approveGate(action.id);
+      return;
+    }
+
+    const nextStatus: ActionPlanStatus = action.status === "running" ? "done" : "running";
+    setActionStatus(action.id, nextStatus);
+
+    dispatch({
+      id: `evt-action-${action.id}-${nextStatus}`,
+      type: "ui.component.added",
+      timestamp: new Date().toISOString(),
+      agentId: "orchestrator",
+      component: {
+        type: "public_alert_draft",
+        props: {
+          channel: "Operational action",
+          message:
+            nextStatus === "done"
+              ? `${action.title} completed by ${action.owner}.`
+              : `${action.title} is now running under ${action.owner}.`,
+        },
+      },
+    });
   }
 
   function dismissBroadcast(actionId: string) {
@@ -287,21 +364,58 @@ export default function CrisisGridRuntime() {
   const cameraSignals = signals.filter((signal) => signal.source === "camera");
   const hasAnyRuntimeEvent = events.length > 0;
   const hasMap = components.some((component) => component.type === "generated_map_surface") || mapLayers.length > 0;
-  const hasGate = Object.values(gates).includes("required") || components.some((component) => component.type === "civic_gate");
-  const hasDaytonaOutput = Object.values(tools).includes("done");
+  const activeCivicGates = useMemo(
+    () =>
+      components.filter(
+        (component): component is CivicGateComponent =>
+          component.type === "civic_gate" &&
+          !handledGateActionIds.has(component.props.actionId),
+      ),
+    [components, handledGateActionIds],
+  );
   const pendingBroadcast = useMemo(
     () =>
       components.find(
         (component): component is PublicBroadcastComponent =>
           component.type === "public_broadcast_panel" &&
           !dismissedBroadcastIds.has(component.props.actionId),
-      ),
+    ),
     [components, dismissedBroadcastIds],
   );
   const dockComponents = useMemo(
-    () => components.filter((component) => component.type !== "public_broadcast_panel"),
-    [components],
+    () =>
+      components
+        .filter((component) => component.type !== "public_broadcast_panel")
+        .filter(
+          (component) =>
+            component.type !== "civic_gate" ||
+            !handledGateActionIds.has(component.props.actionId),
+        )
+        .map((component) => {
+          if (component.type !== "action_plan_board") {
+            return component;
+          }
+
+          return {
+            ...component,
+            props: {
+              ...component.props,
+              actions: component.props.actions.map((action) => ({
+                ...action,
+                status: actionStatusOverrides[action.id] ?? action.status,
+              })),
+            },
+          };
+        }),
+    [components, handledGateActionIds, actionStatusOverrides],
   );
+  const hasGate =
+    activeCivicGates.length > 0 ||
+    Boolean(pendingBroadcast) ||
+    Object.entries(gates).some(
+      ([gateId, status]) => status === "required" && gateId !== "public-alert-gate",
+    );
+  const hasDaytonaOutput = Object.values(tools).includes("done");
   const mapTarget = useMemo(
     () => resolveMapTarget(components, mapLayers),
     [components, mapLayers],
@@ -426,6 +540,8 @@ export default function CrisisGridRuntime() {
             components={dockComponents}
             daytonaDone={hasDaytonaOutput}
             onApproveGate={approveGate}
+            onRejectGate={rejectGate}
+            onActionSelect={handleActionPlanAction}
             focusMode={focusMode}
             maxVisible={maxVisibleComponents}
           />

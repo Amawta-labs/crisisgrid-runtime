@@ -24,9 +24,14 @@ type GeneratedSurfaceStackProps = {
   components: UiComponent[];
   daytonaDone: boolean;
   onApproveGate?: (actionId: string) => void;
+  onRejectGate?: (actionId: string) => void;
+  onActionSelect?: (action: ActionPlanAction) => void;
   focusMode?: "briefing" | "execution" | "approval";
   maxVisible?: number;
 };
+
+type ActionPlanComponent = Extract<UiComponent, { type: "action_plan_board" }>;
+type ActionPlanAction = ActionPlanComponent["props"]["actions"][number];
 
 const visibleGeneratedTypes = new Set<UiComponent["type"]>([
   "incident_card",
@@ -46,6 +51,8 @@ export function GeneratedSurfaceStack({
   components,
   daytonaDone,
   onApproveGate,
+  onRejectGate,
+  onActionSelect,
   focusMode = "briefing",
   maxVisible = 3,
 }: GeneratedSurfaceStackProps) {
@@ -94,6 +101,8 @@ export function GeneratedSurfaceStack({
           component={component}
           daytonaDone={daytonaDone}
           onApproveGate={onApproveGate}
+          onRejectGate={onRejectGate}
+          onActionSelect={onActionSelect}
         />
       ))}
     </aside>
@@ -104,10 +113,14 @@ function GeneratedSurfaceCard({
   component,
   daytonaDone,
   onApproveGate,
+  onRejectGate,
+  onActionSelect,
 }: {
   component: UiComponent;
   daytonaDone: boolean;
   onApproveGate?: (actionId: string) => void;
+  onRejectGate?: (actionId: string) => void;
+  onActionSelect?: (action: ActionPlanAction) => void;
 }) {
   switch (component.type) {
     case "incident_card":
@@ -190,10 +203,10 @@ function GeneratedSurfaceCard({
         >
           <div style={{ display: "grid", gap: 8 }}>
             {component.props.actions.map((action) => (
-              <CompactRow
+              <ActionButtonRow
                 key={action.id}
-                label={action.title}
-                value={`${action.owner} / ${action.status}`}
+                action={action}
+                onClick={() => onActionSelect?.(action)}
               />
             ))}
           </div>
@@ -210,24 +223,47 @@ function GeneratedSurfaceCard({
         >
           <SurfaceTitle>{component.props.title}</SurfaceTitle>
           <SurfaceText>{component.props.risk}</SurfaceText>
-          <button
-            onClick={() => onApproveGate?.(component.props.actionId)}
+          <div
             style={{
-              width: "100%",
-              height: 38,
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 8,
               marginTop: 12,
-              border: `1px solid ${C.green}`,
-              borderRadius: 7,
-              background: "rgba(16,255,133,0.11)",
-              color: C.text,
-              cursor: "pointer",
-              fontWeight: 800,
-              textTransform: "uppercase",
-              fontSize: 12,
             }}
           >
-            {component.props.approvalLabel}
-          </button>
+            <button
+              onClick={() => onRejectGate?.(component.props.actionId)}
+              style={{
+                height: 38,
+                border: `1px solid rgba(255,255,255,0.18)`,
+                borderRadius: 7,
+                background: "rgba(255,255,255,0.045)",
+                color: "#d7dde6",
+                cursor: "pointer",
+                fontWeight: 800,
+                textTransform: "uppercase",
+                fontSize: 11,
+              }}
+            >
+              No autorizar
+            </button>
+            <button
+              onClick={() => onApproveGate?.(component.props.actionId)}
+              style={{
+                height: 38,
+                border: `1px solid ${C.green}`,
+                borderRadius: 7,
+                background: "rgba(16,255,133,0.11)",
+                color: C.text,
+                cursor: "pointer",
+                fontWeight: 800,
+                textTransform: "uppercase",
+                fontSize: 11,
+              }}
+            >
+              {component.props.approvalLabel}
+            </button>
+          </div>
         </SurfaceFrame>
       );
 
@@ -513,6 +549,71 @@ function CompactRow({ label, value }: { label: string; value: string }) {
       </span>
       <span style={{ color: C.muted, fontSize: 11, lineHeight: 1.35 }}>{value}</span>
     </div>
+  );
+}
+
+function ActionButtonRow({
+  action,
+  onClick,
+}: {
+  action: ActionPlanAction;
+  onClick: () => void;
+}) {
+  const done = action.status === "done";
+  const needsApproval = action.status === "needs_approval";
+  const running = action.status === "running";
+  const accent = done ? C.green : needsApproval ? C.amber : running ? C.blue : C.muted;
+  const cta = done
+    ? "Done"
+    : needsApproval
+      ? "Autorizar"
+      : running
+        ? "Mark done"
+        : "Start";
+
+  return (
+    <button
+      type="button"
+      onClick={done ? undefined : onClick}
+      disabled={done}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr auto",
+        alignItems: "center",
+        gap: 10,
+        width: "100%",
+        border: `1px solid ${done ? "rgba(16,255,133,0.2)" : C.border}`,
+        borderRadius: 7,
+        background: done ? "rgba(16,255,133,0.055)" : "rgba(255,255,255,0.04)",
+        padding: 8,
+        textAlign: "left",
+        cursor: done ? "default" : "pointer",
+        opacity: done ? 0.82 : 1,
+      }}
+    >
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: "block", color: C.text, fontSize: 12, fontWeight: 780, lineHeight: 1.35 }}>
+          {action.title}
+        </span>
+        <span style={{ display: "block", marginTop: 3, color: C.muted, fontSize: 11, lineHeight: 1.35 }}>
+          {action.owner} / {action.status}
+        </span>
+      </span>
+      <span
+        style={{
+          border: `1px solid ${accent}`,
+          borderRadius: 999,
+          color: accent,
+          fontSize: 9,
+          fontWeight: 900,
+          padding: "5px 7px",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {cta}
+      </span>
+    </button>
   );
 }
 
