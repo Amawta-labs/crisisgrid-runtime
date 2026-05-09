@@ -1,0 +1,18 @@
+export const C = {
+  bg0: "#02070b",
+  bg1: "#050b11",
+  bg2: "#07131d",
+  panel: "rgba(6,13,20,0.88)",
+  panel2: "rgba(7,16,24,0.72)",
+  border: "rgba(102,160,203,0.18)",
+  borderStrong: "rgba(116,193,255,0.32)",
+  text: "#f4f8ff",
+  muted: "#8995a5",
+  dim: "#516171",
+  green: "#10ff85",
+  amber: "#ffb547",
+  orange: "#ff8500",
+  red: "#ff304b",
+  blue: "#1ea7ff",
+  violet: "#a14cff",
+};

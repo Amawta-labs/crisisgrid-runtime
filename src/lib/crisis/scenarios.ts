@@ -1,0 +1,138 @@
+import type { Scenario } from "./schemas";
+
+export const scenarios: Scenario[] = [
+  {
+    id: "scenario_01_earthquake",
+    name: "Aftershock corridor",
+    incidentType: "earthquake",
+    summary:
+      "Aftershock reports across central Santiago with inconsistent damage signals near transit corridors.",
+    center: [-70.6506, -33.4372],
+    signals: [
+      {
+        id: "sig-001",
+        source: "sensor",
+        text: "Seismic sensor reports 5.7 aftershock, shallow epicenter west of Santiago.",
+        confidence: 0.88,
+        location: "Santiago Centro",
+        receivedAt: "23:08",
+      },
+      {
+        id: "sig-002",
+        source: "traffic",
+        text: "Autopista Central traffic slowed by 62%, reports of debris unconfirmed.",
+        confidence: 0.66,
+        location: "Autopista Central",
+        receivedAt: "23:10",
+      },
+      {
+        id: "sig-003",
+        source: "citizen",
+        text: "People outside buildings, no visible collapse but alarms active.",
+        confidence: 0.54,
+        location: "Barrio Lastarria",
+        receivedAt: "23:11",
+      },
+      {
+        id: "sig-004",
+        source: "radio",
+        text: "Metro service pausing inspections. No structural confirmation yet.",
+        confidence: 0.72,
+        location: "Baquedano",
+        receivedAt: "23:12",
+      },
+    ],
+  },
+  {
+    id: "scenario_02_building_collapse",
+    name: "Providencia collapse",
+    incidentType: "building_collapse",
+    summary:
+      "Conflicting reports of smoke, trapped people and blocked access near Los Leones.",
+    center: [-70.6087, -33.4248],
+    signals: [
+      {
+        id: "sig-101",
+        source: "camera",
+        text: "Visible smoke at Providencia corridor, intermittent camera feed.",
+        confidence: 0.61,
+        location: "Los Leones",
+        receivedAt: "14:17",
+      },
+      {
+        id: "sig-102",
+        source: "radio",
+        text: "Possible partial collapse, not confirmed, Los Leones with Suecia.",
+        confidence: 0.72,
+        location: "Los Leones / Suecia",
+        receivedAt: "14:18",
+      },
+      {
+        id: "sig-103",
+        source: "citizen",
+        text: "There are people trapped, I do not know how many.",
+        confidence: 0.54,
+        location: "Providencia",
+        receivedAt: "14:19",
+      },
+      {
+        id: "sig-104",
+        source: "traffic",
+        text: "Two access routes blocked by stopped vehicles and crowds.",
+        confidence: 0.79,
+        location: "Av. Nueva Providencia",
+        receivedAt: "14:20",
+      },
+      {
+        id: "sig-105",
+        source: "social",
+        text: "Post claims gas smell near building entrance; no responder confirmation.",
+        confidence: 0.43,
+        location: "Providencia",
+        receivedAt: "14:21",
+      },
+    ],
+  },
+  {
+    id: "scenario_03_wildfire_evacuation",
+    name: "Renca wind shift",
+    incidentType: "wildfire_evacuation",
+    summary:
+      "Brush fire advancing toward residential edge with wind shift and uncertain evacuation routes.",
+    center: [-70.728, -33.3946],
+    signals: [
+      {
+        id: "sig-201",
+        source: "sensor",
+        text: "PM2.5 spike and wind shift detected toward residential zone.",
+        confidence: 0.84,
+        location: "Renca",
+        receivedAt: "16:42",
+      },
+      {
+        id: "sig-202",
+        source: "camera",
+        text: "Flame front visible on hillside, distance estimate unreliable.",
+        confidence: 0.68,
+        location: "Cerro Renca",
+        receivedAt: "16:43",
+      },
+      {
+        id: "sig-203",
+        source: "radio",
+        text: "Evacuation route north may be blocked by smoke, needs verification.",
+        confidence: 0.7,
+        location: "Camino Lo Boza",
+        receivedAt: "16:44",
+      },
+      {
+        id: "sig-204",
+        source: "citizen",
+        text: "School nearby is asking whether to shelter or move students.",
+        confidence: 0.58,
+        location: "Renca",
+        receivedAt: "16:45",
+      },
+    ],
+  },
+];
