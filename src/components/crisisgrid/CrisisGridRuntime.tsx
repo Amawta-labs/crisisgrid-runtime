@@ -47,6 +47,26 @@ type VoiceCommandResult = {
   intent: VoiceIntent;
   spokenResponse: string;
 };
+type OperatorScenario = {
+  id: string;
+  title: string;
+  subtitle: string;
+  location: string;
+  severity: "low" | "medium" | "high" | "critical";
+  accent: string;
+  agent: string;
+  events: string[];
+  recommendation: string;
+};
+type OperatorScenarioTemplate = Omit<OperatorScenario, "events"> & {
+  timeline: string[];
+  signals: Array<{
+    source: "camera" | "radio" | "citizen" | "traffic" | "sensor" | "social";
+    text: string;
+    confidence: number;
+    location: string;
+  }>;
+};
 type SpeechRecognitionResultEventLike = {
   results: {
     [index: number]: {
@@ -120,6 +140,7 @@ export default function CrisisGridRuntime() {
   const [dismissedBroadcastIds, setDismissedBroadcastIds] = useState<Set<string>>(() => new Set());
   const [handledGateActionIds, setHandledGateActionIds] = useState<Set<string>>(() => new Set());
   const [actionStatusOverrides, setActionStatusOverrides] = useState<Record<string, ActionPlanStatus>>({});
+  const [operatorScenario, setOperatorScenario] = useState<OperatorScenario | null>(null);
   const timersRef = useRef<number[]>([]);
   const actionQueueRef = useRef<OrchestrationPlan["events"]>([]);
   const {
@@ -166,6 +187,7 @@ export default function CrisisGridRuntime() {
     setDismissedBroadcastIds(new Set());
     setHandledGateActionIds(new Set());
     setActionStatusOverrides({});
+    setOperatorScenario(null);
     timersRef.current.forEach((timer) => window.clearTimeout(timer));
     timersRef.current = [];
     actionQueueRef.current = [];
@@ -480,7 +502,60 @@ export default function CrisisGridRuntime() {
       });
     }, 260);
 
+    activateOperatorScenario(target);
     void runDaytonaTool(event);
+  }
+
+  function activateOperatorScenario(target: OperatorMapTarget) {
+    const template = getOperatorScenarioTemplate(target);
+    setOperatorScenario({ ...template, events: [] });
+
+    template.timeline.forEach((timelineEvent, index) => {
+      const timer = window.setTimeout(() => {
+        setOperatorScenario((current) =>
+          current?.id === template.id
+            ? { ...current, events: [...current.events, timelineEvent] }
+            : current,
+        );
+
+        const signal = template.signals[index];
+        if (signal) {
+          dispatch({
+            id: nextRuntimeEventId(`evt-${template.id}-signal`),
+            type: "signal.received",
+            timestamp: new Date().toISOString(),
+            agentId: target.id === "shoa-valparaiso" ? "public_api_sensor_agent" : "orchestrator",
+            signal: {
+              id: nextRuntimeEventId(`${template.id}-signal`),
+              ...signal,
+              receivedAt: new Date().toISOString(),
+            },
+          });
+        }
+      }, 220 + index * 620);
+
+      timersRef.current.push(timer);
+    });
+
+    const traceTimer = window.setTimeout(() => {
+      dispatch({
+        id: nextRuntimeEventId(`evt-${template.id}-central-surface`),
+        type: "ui.component.added",
+        timestamp: new Date().toISOString(),
+        agentId: "ui_planner_agent",
+        component: {
+          type: "agent_trace_timeline",
+          props: {
+            events: template.timeline.map((event, index) => ({
+              label: `${template.location} ${index + 1}`,
+              detail: event,
+            })),
+          },
+        },
+      });
+    }, 980);
+
+    timersRef.current.push(traceTimer);
   }
 
   async function handleVoiceCommand(transcript: string) {
@@ -729,15 +804,17 @@ export default function CrisisGridRuntime() {
             <div
               style={{
                 position: "absolute",
-                left: hasGate ? 316 : 28,
+                left: hasGate ? 304 : 28,
                 bottom: 78,
-                width: generatedDockVisible ? 356 : "min(760px, calc(100vw - 56px))",
+                width: generatedDockVisible
+                  ? "min(620px, calc(100vw - 430px))"
+                  : "min(920px, calc(100vw - 56px))",
                 transform: generatedDockVisible ? "translateY(0)" : "translateY(0)",
                 transition: "left 520ms ease, width 520ms ease, opacity 420ms ease",
                 pointerEvents: "auto",
               }}
             >
-              <VisualVerificationPanel cameraSignals={cameraSignals} compact={generatedDockVisible || hasGate} />
+              <VisualVerificationPanel cameraSignals={cameraSignals} compact={hasGate} />
             </div>
           ) : null}
 
@@ -774,6 +851,13 @@ export default function CrisisGridRuntime() {
           component={pendingBroadcast}
           onAuthorize={() => authorizeBroadcast(pendingBroadcast)}
           onReject={() => dismissBroadcast(pendingBroadcast.props.actionId)}
+        />
+      ) : null}
+
+      {operatorScenario ? (
+        <OperatorScenarioSurface
+          scenario={operatorScenario}
+          onClose={() => setOperatorScenario(null)}
         />
       ) : null}
     </div>
@@ -1175,6 +1259,157 @@ function OperatorVoiceControl({
   );
 }
 
+function OperatorScenarioSurface({
+  scenario,
+  onClose,
+}: {
+  scenario: OperatorScenario;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 31,
+        display: "grid",
+        placeItems: "center",
+        padding: 24,
+        pointerEvents: "none",
+        background:
+          "radial-gradient(circle at 50% 52%, rgba(16,255,133,0.08), rgba(1,4,7,0.12) 36%, rgba(1,4,7,0.28) 100%)",
+      }}
+    >
+      <section
+        style={{
+          width: "min(660px, calc(100vw - 48px))",
+          border: `1px solid ${scenario.accent}`,
+          borderRadius: 12,
+          background: "linear-gradient(145deg, rgba(4,12,18,0.96), rgba(1,5,9,0.93))",
+          boxShadow: `0 32px 110px rgba(0,0,0,0.64), 0 0 46px ${scenario.accent}24`,
+          color: C.text,
+          overflow: "hidden",
+          pointerEvents: "auto",
+          backdropFilter: "blur(22px)",
+          animation: "surfaceIn 360ms ease both",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 16,
+            padding: "18px 20px 14px",
+            borderBottom: `1px solid rgba(255,255,255,0.08)`,
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: scenario.accent, fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>
+              {scenario.agent}
+            </div>
+            <h2 style={{ margin: "6px 0 0", fontSize: 23, lineHeight: 1.14, fontWeight: 900 }}>
+              {scenario.title}
+            </h2>
+            <div style={{ marginTop: 7, color: C.muted, fontSize: 12, fontWeight: 800, textTransform: "uppercase" }}>
+              {scenario.location} / {scenario.severity}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              width: 34,
+              height: 34,
+              border: `1px solid rgba(255,255,255,0.18)`,
+              borderRadius: 8,
+              background: "rgba(255,255,255,0.045)",
+              color: C.text,
+              cursor: "pointer",
+              fontWeight: 900,
+            }}
+          >
+            X
+          </button>
+        </div>
+
+        <div style={{ padding: 20 }}>
+          <p style={{ margin: 0, color: "#cbd4df", fontSize: 13, lineHeight: 1.55 }}>
+            {scenario.subtitle}
+          </p>
+
+          <div style={{ display: "grid", gap: 9, marginTop: 16 }}>
+            {scenario.events.length === 0 ? (
+              <div
+                style={{
+                  border: `1px dashed rgba(255,255,255,0.18)`,
+                  borderRadius: 8,
+                  padding: 12,
+                  color: C.muted,
+                  fontSize: 12,
+                }}
+              >
+                Orchestrator is compiling the location-specific interface...
+              </div>
+            ) : (
+              scenario.events.map((event, index) => (
+                <div
+                  key={`${scenario.id}-${event}`}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "28px 1fr",
+                    gap: 10,
+                    alignItems: "start",
+                    border: `1px solid rgba(255,255,255,0.1)`,
+                    borderRadius: 8,
+                    background: "rgba(255,255,255,0.035)",
+                    padding: 10,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 24,
+                      height: 24,
+                      display: "grid",
+                      placeItems: "center",
+                      borderRadius: 999,
+                      border: `1px solid ${scenario.accent}`,
+                      color: scenario.accent,
+                      fontSize: 11,
+                      fontWeight: 900,
+                    }}
+                  >
+                    {index + 1}
+                  </span>
+                  <span style={{ color: C.text, fontSize: 12, lineHeight: 1.45 }}>
+                    {event}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div
+            style={{
+              marginTop: 16,
+              border: `1px solid ${scenario.accent}55`,
+              borderRadius: 9,
+              background: `${scenario.accent}12`,
+              color: C.text,
+              padding: 12,
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            <strong style={{ color: scenario.accent, textTransform: "uppercase" }}>Recommendation: </strong>
+            {scenario.recommendation}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function XBroadcastGate({
   component,
   onAuthorize,
@@ -1403,6 +1638,147 @@ function shouldDockComponent(type: UiComponent["type"]) {
   ].includes(type);
 }
 
+function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenarioTemplate {
+  if (target.id === "shoa-valparaiso") {
+    return {
+      id: "shoa-valparaiso",
+      title: "SHOA coastal protocol generated",
+      subtitle:
+        "The operator selected the Valparaiso coast. CrisisGrid pivots from urban earthquake verification into coastal tsunami-readiness and evacuation-route monitoring.",
+      location: "Valparaiso / central coast",
+      severity: "medium",
+      accent: C.blue,
+      agent: "public_api_sensor_agent",
+      recommendation:
+        "Keep the coastal advisory in watch mode. No evacuation order is suggested unless SHOA threshold or repeated port-camera evidence changes.",
+      timeline: [
+        "SHOA/DMC adapter checks central-coast threshold and tide conditions.",
+        "Port and coastal cameras are prioritized over Vitacura corridor feeds.",
+        "UI Planner prepares coastal route, port access and public watch surfaces.",
+        "Gatekeeper holds evacuation copy until institutional threshold changes.",
+      ],
+      signals: [
+        {
+          source: "sensor",
+          text: "SHOA-style check: no tsunami evacuation threshold crossed for central coast.",
+          confidence: 0.76,
+          location: "Valparaiso / central coast",
+        },
+        {
+          source: "camera",
+          text: "Port camera sweep requested; no abnormal coastal retreat visible in available feeds.",
+          confidence: 0.64,
+          location: "Muelle Prat / Valparaiso",
+        },
+        {
+          source: "traffic",
+          text: "Coastal evacuation routes remain open; congestion building near port access.",
+          confidence: 0.69,
+          location: "Avenida Errazuriz / Valparaiso",
+        },
+        {
+          source: "social",
+          text: "Repeated citizen questions about tsunami risk detected, but no confirmed evacuation instruction.",
+          confidence: 0.58,
+          location: "Valparaiso social stream",
+        },
+      ],
+    };
+  }
+
+  if (target.id === "conaf-metropolitano") {
+    return {
+      id: "conaf-metropolitano",
+      title: "CONAF wildfire surface generated",
+      subtitle:
+        "The operator selected the Cerro San Cristobal corridor. CrisisGrid swaps the earthquake surface for wildfire spread, wind and evacuation staging.",
+      location: "Cerro San Cristobal / RM",
+      severity: "high",
+      accent: C.orange,
+      agent: "disaster_physics_agent",
+      recommendation:
+        "Stage Bomberos/CONAF contact as mock HITL and keep wind direction visible before issuing neighborhood guidance.",
+      timeline: [
+        "CONAF/NASA adapter checks heat signature and smoke-column assumptions.",
+        "Open-Meteo wind layer is requested for hill-to-neighborhood spread.",
+        "Camera agent reprioritizes smoke-facing cameras near Pedro de Valdivia Norte.",
+        "Gatekeeper prepares emergency-service contact gate without real dispatch.",
+      ],
+      signals: [
+        {
+          source: "sensor",
+          text: "CONAF-style wildfire watch: smoke column possible near urban hill interface.",
+          confidence: 0.71,
+          location: "Cerro San Cristobal",
+        },
+        {
+          source: "sensor",
+          text: "Open-Meteo wind check: south-west drift could push smoke toward residential streets.",
+          confidence: 0.68,
+          location: "Providencia / Recoleta",
+        },
+        {
+          source: "camera",
+          text: "Camera verification requested for smoke visibility and access-road obstruction.",
+          confidence: 0.63,
+          location: "Pedro de Valdivia Norte",
+        },
+        {
+          source: "radio",
+          text: "Ops channel suggests staging a mock Bomberos contact pending visual confirmation.",
+          confidence: 0.66,
+          location: "Metropolitan response net",
+        },
+      ],
+    };
+  }
+
+  return {
+    id: "costanera-vitacura",
+    title: "Vitacura seismic verification regenerated",
+    subtitle:
+      "The operator returned to the seismic corridor. CrisisGrid recenters visual verification, inspection routing and public-advisory gating.",
+    location: "Vitacura / Costanera",
+    severity: "high",
+    accent: C.green,
+    agent: "camera_agent",
+    recommendation:
+      "Verify visible ground truth before escalating public guidance. Use CivicGate for public advisory or emergency-service mock contact.",
+    timeline: [
+      "CSN-style seismic incident remains the active parent event.",
+      "Nearby Costanera cameras are pulled back into the center of the workflow.",
+      "Inspection route is recalculated around congestion and bridge-access uncertainty.",
+      "UI Planner restores public advisory and dispatch gates for operator approval.",
+    ],
+    signals: [
+      {
+        source: "sensor",
+        text: "CSN-style seismic signal still relevant for Vitacura-Costanera corridor.",
+        confidence: 0.82,
+        location: "Vitacura / Costanera",
+      },
+      {
+        source: "camera",
+        text: "Costanera feed shows congestion and shaking evidence; no visible collapse confirmed.",
+        confidence: 0.74,
+        location: "Costanera Norte access",
+      },
+      {
+        source: "traffic",
+        text: "Route planner detects slowdown on Costanera corridor and recommends inspection staging.",
+        confidence: 0.7,
+        location: "Avenida Kennedy / Costanera",
+      },
+      {
+        source: "social",
+        text: "Citizen reports ask whether to avoid Vitacura-Costanera; public guidance remains gated.",
+        confidence: 0.59,
+        location: "Región Metropolitana",
+      },
+    ],
+  };
+}
+
 function describeRuntimeEvent(event: RuntimeEvent) {
   const agent = getCrisisAgent(event.agentId)?.label ?? event.agentId;
 
@@ -1438,6 +1814,12 @@ function VisualVerificationPanel({
   cameraSignals: Array<{ id: string; text: string; location: string; confidence: number }>;
   compact?: boolean;
 }) {
+  const visibleSignals = cameraSignals.slice(0, compact ? 1 : 3);
+  const heroSignal =
+    visibleSignals.find((signal) => cameraAssets[signal.id]?.kind === "video") ??
+    visibleSignals[0];
+  const secondarySignals = visibleSignals.filter((signal) => signal.id !== heroSignal?.id);
+
   return (
     <section
       style={{
@@ -1483,78 +1865,103 @@ function VisualVerificationPanel({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: compact ? "1fr" : "repeat(3, minmax(0, 1fr))",
+          gridTemplateColumns: compact ? "1fr" : "minmax(0, 2.25fr) minmax(190px, 1fr)",
           gap: 10,
           marginTop: 14,
         }}
       >
-        {cameraSignals.slice(0, compact ? 1 : 3).map((signal) => {
-          const asset = cameraAssets[signal.id] ?? {
-            src: "/camera-feeds/concepcion.jpg",
-            kind: "image" as const,
-          };
-
-          return (
-            <article
-              key={signal.id}
-              style={{
-                position: "relative",
-                minHeight: 104,
-                border: `1px solid ${C.borderStrong}`,
-                borderRadius: 8,
-                overflow: "hidden",
-                background: "#03080c",
-              }}
-            >
-              {asset.kind === "video" ? (
-                <video
-                  src={asset.src}
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  preload="auto"
-                  aria-label={signal.location}
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    filter: "grayscale(1) contrast(1.22) brightness(0.66)",
-                  }}
-                />
-              ) : (
-                <Image
-                  src={asset.src}
-                  alt={signal.location}
-                  fill
-                  loading="eager"
-                  sizes="30vw"
-                  style={{ objectFit: "cover", filter: "grayscale(1) contrast(1.18) brightness(0.64)" }}
-                />
-              )}
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  background:
-                    "linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.78))",
-                }}
-              />
-              <div style={{ position: "absolute", left: 10, right: 10, bottom: 9 }}>
-                <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase" }}>
-                  {signal.location}
-                </div>
-                <div style={{ marginTop: 4, color: "#c8d0da", fontSize: 11, lineHeight: 1.35 }}>
-                  {signal.text}
-                </div>
-              </div>
-            </article>
-          );
-        })}
+        {heroSignal ? (
+          <CameraFeedCard signal={heroSignal} size="hero" />
+        ) : null}
+        {!compact && secondarySignals.length > 0 ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {secondarySignals.map((signal) => (
+              <CameraFeedCard key={signal.id} signal={signal} size="small" />
+            ))}
+          </div>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function CameraFeedCard({
+  signal,
+  size,
+}: {
+  signal: { id: string; text: string; location: string; confidence: number };
+  size: "hero" | "small";
+}) {
+  const asset = cameraAssets[signal.id] ?? {
+    src: "/camera-feeds/concepcion.jpg",
+    kind: "image" as const,
+  };
+  const isHero = size === "hero";
+
+  return (
+    <article
+      style={{
+        position: "relative",
+        minHeight: isHero ? 282 : 136,
+        border: `1px solid ${isHero ? "rgba(16,255,133,0.44)" : C.borderStrong}`,
+        borderRadius: 8,
+        overflow: "hidden",
+        background: "#03080c",
+        boxShadow: isHero ? "0 0 34px rgba(16,255,133,0.16)" : "none",
+      }}
+    >
+      {asset.kind === "video" ? (
+        <video
+          src={asset.src}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          aria-label={signal.location}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            filter: "grayscale(1) contrast(1.18) brightness(0.78)",
+          }}
+        />
+      ) : (
+        <Image
+          src={asset.src}
+          alt={signal.location}
+          fill
+          loading="eager"
+          sizes={isHero ? "60vw" : "22vw"}
+          style={{ objectFit: "cover", filter: "grayscale(1) contrast(1.18) brightness(0.64)" }}
+        />
+      )}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.72))",
+        }}
+      />
+      <div style={{ position: "absolute", left: isHero ? 14 : 10, right: isHero ? 14 : 10, bottom: isHero ? 13 : 9 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+          <div style={{ fontSize: isHero ? 13 : 12, fontWeight: 900, textTransform: "uppercase" }}>
+            {signal.location}
+          </div>
+          {isHero ? (
+            <div style={{ color: C.green, fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>
+              seismic video feed
+            </div>
+          ) : null}
+        </div>
+        <div style={{ marginTop: 5, color: "#d4dbe5", fontSize: isHero ? 12 : 11, lineHeight: 1.35 }}>
+          {signal.text}
+        </div>
+      </div>
+    </article>
   );
 }
 
