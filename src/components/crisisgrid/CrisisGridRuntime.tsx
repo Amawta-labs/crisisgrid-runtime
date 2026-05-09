@@ -536,7 +536,7 @@ export default function CrisisGridRuntime() {
           },
         },
       });
-    }, 260);
+    }, 520);
 
     activateOperatorScenario(target);
     void runDaytonaTool(event);
@@ -568,7 +568,7 @@ export default function CrisisGridRuntime() {
             },
           });
         }
-      }, 220 + index * 620);
+      }, 420 + index * 1050);
 
       timersRef.current.push(timer);
     });
@@ -589,7 +589,7 @@ export default function CrisisGridRuntime() {
           },
         },
       });
-    }, 980);
+    }, 1850);
 
     timersRef.current.push(traceTimer);
 
@@ -602,7 +602,7 @@ export default function CrisisGridRuntime() {
           agentId: "ui_planner_agent",
           component,
         });
-      }, 1320 + index * 420);
+      }, 2600 + index * 980);
 
       timersRef.current.push(componentTimer);
     });

@@ -263,28 +263,28 @@ export function buildVitacuraEarthquakeOrchestration(
           "UI Planner receives incident class, visual verification needs and public-decision risk.",
         confidence: 0.87,
       }),
-      scheduled(5200, {
+      scheduled(5400, {
         id: "evt-incident-card",
         type: "ui.component.added",
         timestamp,
         agentId: "ui_planner_agent",
         component: incidentCard,
       }),
-      scheduled(5750, {
+      scheduled(6400, {
         id: "evt-map-surface",
         type: "ui.component.added",
         timestamp,
         agentId: "ui_planner_agent",
         component: mapSurface,
       }),
-      scheduled(6020, {
+      scheduled(7350, {
         id: "evt-contradiction-panel",
         type: "ui.component.added",
         timestamp,
         agentId: "ui_planner_agent",
         component: contradictionPanel,
       }),
-      scheduled(6250, {
+      scheduled(8100, {
         id: "evt-map-layer",
         type: "map.layer.added",
         timestamp,
@@ -300,21 +300,21 @@ export function buildVitacuraEarthquakeOrchestration(
           },
         },
       }),
-      scheduled(7050, {
+      scheduled(9200, {
         id: "evt-tool-panel",
         type: "ui.component.added",
         timestamp,
         agentId: "ui_planner_agent",
         component: toolPanel,
       }),
-      scheduled(7300, {
+      scheduled(10300, {
         id: "evt-agent-trace-timeline",
         type: "ui.component.added",
         timestamp,
         agentId: "ui_planner_agent",
         component: traceTimeline,
       }),
-      scheduled(7550, {
+      scheduled(11200, {
         id: "evt-daytona-start",
         type: "tool.started",
         timestamp,
@@ -329,7 +329,7 @@ export function buildVitacuraEarthquakeOrchestration(
           visualEvidence: cameraSignals.map((signal) => signal.location),
         },
       }),
-      scheduled(8800, {
+      scheduled(13000, {
         id: "evt-gate-required",
         type: "gate.required",
         timestamp,
@@ -341,21 +341,21 @@ export function buildVitacuraEarthquakeOrchestration(
           "Cameras reduce uncertainty, but public movement still requires human confirmation.",
         actionId: "publish-alert",
       }),
-      scheduled(9000, {
+      scheduled(13700, {
         id: "evt-civic-gate",
         type: "ui.component.added",
         timestamp,
         agentId: "gatekeeper_agent",
         component: civicGate,
       }),
-      scheduled(9320, {
+      scheduled(14500, {
         id: "evt-public-broadcast-panel",
         type: "ui.component.added",
         timestamp,
         agentId: "gatekeeper_agent",
         component: publicBroadcastPanel,
       }),
-      scheduled(9620, {
+      scheduled(15500, {
         id: "evt-emergency-dispatch-required",
         type: "gate.required",
         timestamp,
@@ -366,7 +366,7 @@ export function buildVitacuraEarthquakeOrchestration(
           "Contacting or dispatching emergency services is operationally sensitive and requires explicit human approval. Demo mode only.",
         actionId: emergencyDispatchPanel.props.actionId,
       }),
-      scheduled(9820, {
+      scheduled(16200, {
         id: "evt-emergency-dispatch-panel",
         type: "ui.component.added",
         timestamp,
