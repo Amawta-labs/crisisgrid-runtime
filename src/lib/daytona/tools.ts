@@ -6,6 +6,7 @@ export const daytonaToolNameSchema = z.enum([
   "compile_operational_plan",
   "generate_public_alert_packet",
   "publish_public_alert_mock",
+  "contact_emergency_services_mock",
   "navigate_map_to_target",
 ]);
 
@@ -98,6 +99,7 @@ type ToolRequest = {
     | "compile_operational_plan"
     | "generate_public_alert_packet"
     | "publish_public_alert_mock"
+    | "contact_emergency_services_mock"
     | "navigate_map_to_target";
   incidentType: string;
   location: string;
@@ -201,6 +203,45 @@ function runTool(input: ToolRequest) {
       requiresHumanApproval: false,
       toolContract:
         "Mock publication artifact. No real Twitter/X API call was made.",
+    };
+  }
+
+  if (input.toolName === "contact_emergency_services_mock") {
+    const service =
+      typeof input.input.service === "string" ? input.input.service : "SENAPRED";
+    const reason =
+      typeof input.input.reason === "string"
+        ? input.input.reason
+        : "Operator-approved emergency coordination drill.";
+    const priority =
+      typeof input.input.priority === "string" ? input.input.priority : "high";
+    const location =
+      typeof input.input.location === "string"
+        ? input.input.location
+        : input.location;
+    const ticketId =
+      "svc-mock-" +
+      String(service).toLowerCase().replace(/[^a-z0-9]+/g, "-") +
+      "-" +
+      Date.now();
+
+    return {
+      status: "contacted_mock",
+      service,
+      ticketId,
+      message:
+        "MOCK ONLY: " +
+        service +
+        " dispatch/contact package staged for " +
+        location +
+        " (" +
+        priority +
+        "). Reason: " +
+        reason +
+        ". No real emergency service was contacted.",
+      requiresHumanApproval: false,
+      toolContract:
+        "Mock emergency-service artifact. No real call, dispatch, SMS, radio or institutional API was used.",
     };
   }
 
@@ -362,6 +403,41 @@ function runLocalToolFallback(
         message,
         status: "published_mock",
         requiresHumanApproval: false,
+      },
+    };
+  }
+
+  if (request.toolName === "contact_emergency_services_mock") {
+    const service =
+      typeof request.input.service === "string" ? request.input.service : "SENAPRED";
+    const reason =
+      typeof request.input.reason === "string"
+        ? request.input.reason
+        : "Operator-approved emergency coordination drill.";
+    const priority =
+      typeof request.input.priority === "string" ? request.input.priority : "high";
+    const location =
+      typeof request.input.location === "string"
+        ? request.input.location
+        : request.location;
+    const ticketId = `svc-mock-${service.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+
+    return {
+      runtime,
+      toolName: request.toolName,
+      status: "completed",
+      logs: [
+        "Validated emergency service dispatch packet.",
+        "Applied HITL approval guard.",
+        "Returned mock contact artifact; no real emergency service was contacted.",
+      ],
+      output: {
+        status: "contacted_mock",
+        service,
+        ticketId,
+        message:
+          `MOCK ONLY: ${service} dispatch/contact package staged for ${location} (${priority}). ` +
+          `Reason: ${reason}. No real emergency service was contacted.`,
       },
     };
   }

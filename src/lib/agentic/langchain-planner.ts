@@ -47,6 +47,7 @@ export const agentPlannerDecisionSchema = z.object({
       "action_plan_board",
       "public_alert_draft",
       "civic_gate",
+      "emergency_dispatch_panel",
       "agent_trace_timeline",
       "tool_creation_panel",
     ]),

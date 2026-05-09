@@ -11,6 +11,13 @@ export const signalSourceSchema = z.enum([
 
 export const severitySchema = z.enum(["low", "medium", "high", "critical"]);
 
+export const emergencyServiceSchema = z.enum([
+  "SAMU",
+  "Bomberos",
+  "Carabineros",
+  "SENAPRED",
+]);
+
 export const incidentTypeSchema = z.enum([
   "earthquake",
   "building_collapse",
@@ -131,6 +138,17 @@ export const uiComponentSchema = z.discriminatedUnion("type", [
       handle: z.string(),
       message: z.string(),
       autonomy: z.enum(["draft_only", "autonomous_after_approval"]),
+      actionId: z.string(),
+      approvalLabel: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal("emergency_dispatch_panel"),
+    props: z.object({
+      service: emergencyServiceSchema,
+      reason: z.string(),
+      location: z.string(),
+      priority: severitySchema,
       actionId: z.string(),
       approvalLabel: z.string(),
     }),

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BadgeCheck, BrainCircuit, Eye, RadioTower, Satellite, Send } from "lucide-react";
+import { BadgeCheck, BrainCircuit, Eye, Mic, RadioTower, Satellite, Send, Volume2 } from "lucide-react";
 
 import type { OrchestrationPlan } from "@/lib/agentic/orchestration";
 import { crisisAgents, getCrisisAgent } from "@/lib/agentic/agents";
@@ -23,10 +23,57 @@ type ToolRunResponse = {
 };
 
 type PublicBroadcastComponent = Extract<UiComponent, { type: "public_broadcast_panel" }>;
+type EmergencyDispatchComponent = Extract<UiComponent, { type: "emergency_dispatch_panel" }>;
 type CivicGateComponent = Extract<UiComponent, { type: "civic_gate" }>;
 type ActionPlanComponent = Extract<UiComponent, { type: "action_plan_board" }>;
 type ActionPlanAction = ActionPlanComponent["props"]["actions"][number];
 type ActionPlanStatus = ActionPlanAction["status"];
+type VoiceIntent = {
+  kind:
+    | "navigate_map"
+    | "approve_public_alert"
+    | "hold_public_alert"
+    | "publish_x_alert"
+    | "contact_emergency_services"
+    | "summarize_status"
+    | "noop";
+  targetId?: OperatorMapTarget["id"];
+  service?: EmergencyDispatchComponent["props"]["service"];
+  priority?: EmergencyDispatchComponent["props"]["priority"];
+  reason?: string;
+  confidence: number;
+};
+type VoiceCommandResult = {
+  intent: VoiceIntent;
+  spokenResponse: string;
+};
+type SpeechRecognitionResultEventLike = {
+  results: {
+    [index: number]: {
+      [index: number]: {
+        transcript: string;
+      };
+    };
+  };
+};
+type SpeechRecognitionLike = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+let runtimeEventSequence = 0;
+
+function nextRuntimeEventId(prefix: string) {
+  runtimeEventSequence += 1;
+  return `${prefix}-${runtimeEventSequence}`;
+}
 
 const cameraAssets: Record<string, { src: string; kind: "image" | "video" }> = {
   "cam-vitacura-costanera": {
@@ -169,6 +216,17 @@ export default function CrisisGridRuntime() {
   }, [startOrchestration]);
 
   function approveGate(actionId: string) {
+    const emergencyDispatch = components.find(
+      (component): component is EmergencyDispatchComponent =>
+        component.type === "emergency_dispatch_panel" &&
+        component.props.actionId === actionId,
+    );
+
+    if (emergencyDispatch) {
+      authorizeEmergencyDispatch(emergencyDispatch);
+      return;
+    }
+
     setHandledGateActionIds((current) => {
       const next = new Set(current);
       next.add(actionId);
@@ -217,12 +275,37 @@ export default function CrisisGridRuntime() {
   }
 
   function rejectGate(actionId: string) {
+    const emergencyDispatch = components.find(
+      (component): component is EmergencyDispatchComponent =>
+        component.type === "emergency_dispatch_panel" &&
+        component.props.actionId === actionId,
+    );
+
     setHandledGateActionIds((current) => {
       const next = new Set(current);
       next.add(actionId);
       return next;
     });
     setActionStatus(actionId, "queued");
+
+    if (emergencyDispatch) {
+      dispatch({
+        id: `evt-${actionId}-mock-dispatch-rejected`,
+        type: "ui.component.added",
+        timestamp: new Date().toISOString(),
+        agentId: "gatekeeper_agent",
+        component: {
+          type: "public_alert_draft",
+          props: {
+            channel: "Operator decision",
+            message:
+              `Mock contact to ${emergencyDispatch.props.service} was not authorized. ` +
+              "No real emergency service was contacted or dispatched.",
+          },
+        },
+      });
+      return;
+    }
 
     dispatch({
       id: `evt-${actionId}-held-by-operator`,
@@ -320,6 +403,45 @@ export default function CrisisGridRuntime() {
     void runDaytonaTool(event);
   }
 
+  function authorizeEmergencyDispatch(component: EmergencyDispatchComponent) {
+    setHandledGateActionIds((current) => {
+      const next = new Set(current);
+      next.add(component.props.actionId);
+      return next;
+    });
+    setActionStatus(component.props.actionId, "done");
+
+    dispatch({
+      id: `evt-${component.props.actionId}-approved`,
+      type: "gate.approved",
+      timestamp: new Date().toISOString(),
+      agentId: "gatekeeper_agent",
+      gateId: "emergency-dispatch-gate",
+      actionId: component.props.actionId,
+      approvedBy: "operator",
+    });
+
+    const event: Extract<RuntimeEvent, { type: "tool.started" }> = {
+      id: `evt-${component.props.actionId}-started`,
+      type: "tool.started",
+      timestamp: new Date().toISOString(),
+      agentId: "tool_execution_agent",
+      toolId: component.props.actionId,
+      toolName: "contact_emergency_services_mock",
+      runtime: "daytona",
+      input: {
+        incidentType: "earthquake",
+        location: component.props.location,
+        service: component.props.service,
+        reason: component.props.reason,
+        priority: component.props.priority,
+      },
+    };
+
+    dispatch(event);
+    void runDaytonaTool(event);
+  }
+
   function requestMapNavigation(target: OperatorMapTarget) {
     const timestamp = new Date().toISOString();
     const toolId = `navigate-map-${target.id}`;
@@ -361,59 +483,156 @@ export default function CrisisGridRuntime() {
     void runDaytonaTool(event);
   }
 
+  async function handleVoiceCommand(transcript: string) {
+    const response = await fetch("/api/agent/voice-command", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        transcript,
+        context: {
+          latestEvent: latestEvent ? describeRuntimeEvent(latestEvent) : null,
+          activeObjectives: objectives,
+          pendingGate: activeCivicGates[0]?.props.title ?? null,
+          pendingBroadcast: pendingBroadcast?.props.message ?? null,
+          emergencyDispatches: activeEmergencyDispatches.map((component) => ({
+            service: component.props.service,
+            location: component.props.location,
+            priority: component.props.priority,
+          })),
+        },
+      }),
+    });
+    const result = (await response.json()) as VoiceCommandResult;
+
+    dispatch({
+      id: nextRuntimeEventId("evt-voice-command"),
+      type: "ui.component.added",
+      timestamp: new Date().toISOString(),
+      agentId: "orchestrator",
+      component: {
+        type: "agent_trace_timeline",
+        props: {
+          events: [
+            { label: "Operator voice", detail: transcript },
+            {
+              label: "Gemini intent",
+              detail: `${result.intent.kind} / ${Math.round(result.intent.confidence * 100)}%`,
+            },
+          ],
+        },
+      },
+    });
+
+    executeVoiceIntent(result.intent);
+
+    return result.spokenResponse;
+  }
+
+  function executeVoiceIntent(intent: VoiceIntent) {
+    switch (intent.kind) {
+      case "navigate_map": {
+        const target =
+          operatorMapTargets.find((mapTarget) => mapTarget.id === intent.targetId) ??
+          operatorMapTargets[0];
+        requestMapNavigation(target);
+        return;
+      }
+
+      case "approve_public_alert":
+        approveGate("publish-alert");
+        return;
+
+      case "hold_public_alert":
+        rejectGate("publish-alert");
+        return;
+
+      case "publish_x_alert":
+        if (pendingBroadcast) {
+          authorizeBroadcast(pendingBroadcast);
+        }
+        return;
+
+      case "contact_emergency_services":
+        dispatch({
+          id: nextRuntimeEventId("evt-voice-emergency-dispatch"),
+          type: "ui.component.added",
+          timestamp: new Date().toISOString(),
+          agentId: "gatekeeper_agent",
+          component: {
+            type: "emergency_dispatch_panel",
+            props: {
+              service: intent.service ?? "SENAPRED",
+              reason: intent.reason ?? "Operator voice request during seismic verification",
+              location: "Vitacura-Costanera corridor",
+              priority: intent.priority ?? "high",
+              actionId: nextRuntimeEventId("voice-emergency"),
+              approvalLabel: "Authorize mock contact",
+            },
+          },
+        });
+        return;
+
+      case "summarize_status":
+      case "noop":
+        return;
+    }
+  }
+
   const cameraSignals = signals.filter((signal) => signal.source === "camera");
   const hasAnyRuntimeEvent = events.length > 0;
   const hasMap = components.some((component) => component.type === "generated_map_surface") || mapLayers.length > 0;
-  const activeCivicGates = useMemo(
-    () =>
-      components.filter(
-        (component): component is CivicGateComponent =>
-          component.type === "civic_gate" &&
-          !handledGateActionIds.has(component.props.actionId),
-      ),
-    [components, handledGateActionIds],
+  const activeCivicGates = components.filter(
+    (component): component is CivicGateComponent =>
+      component.type === "civic_gate" &&
+      !handledGateActionIds.has(component.props.actionId),
   );
-  const pendingBroadcast = useMemo(
-    () =>
-      components.find(
-        (component): component is PublicBroadcastComponent =>
-          component.type === "public_broadcast_panel" &&
-          !dismissedBroadcastIds.has(component.props.actionId),
-    ),
-    [components, dismissedBroadcastIds],
+  const pendingBroadcast = components.find(
+    (component): component is PublicBroadcastComponent =>
+      component.type === "public_broadcast_panel" &&
+      !dismissedBroadcastIds.has(component.props.actionId),
   );
-  const dockComponents = useMemo(
-    () =>
-      components
-        .filter((component) => component.type !== "public_broadcast_panel")
-        .filter(
-          (component) =>
-            component.type !== "civic_gate" ||
-            !handledGateActionIds.has(component.props.actionId),
-        )
-        .map((component) => {
-          if (component.type !== "action_plan_board") {
-            return component;
-          }
+  const activeEmergencyDispatches = components.filter(
+    (component): component is EmergencyDispatchComponent =>
+      component.type === "emergency_dispatch_panel" &&
+      !handledGateActionIds.has(component.props.actionId),
+  );
+  const dockComponents = components
+    .filter((component) => component.type !== "public_broadcast_panel")
+    .filter(
+      (component) =>
+        component.type !== "emergency_dispatch_panel" ||
+        !handledGateActionIds.has(component.props.actionId),
+    )
+    .filter(
+      (component) =>
+        component.type !== "civic_gate" ||
+        !handledGateActionIds.has(component.props.actionId),
+    )
+    .map((component) => {
+      if (component.type !== "action_plan_board") {
+        return component;
+      }
 
-          return {
-            ...component,
-            props: {
-              ...component.props,
-              actions: component.props.actions.map((action) => ({
-                ...action,
-                status: actionStatusOverrides[action.id] ?? action.status,
-              })),
-            },
-          };
-        }),
-    [components, handledGateActionIds, actionStatusOverrides],
-  );
+      return {
+        ...component,
+        props: {
+          ...component.props,
+          actions: component.props.actions.map((action) => ({
+            ...action,
+            status: actionStatusOverrides[action.id] ?? action.status,
+          })),
+        },
+      };
+    });
   const hasGate =
     activeCivicGates.length > 0 ||
+    activeEmergencyDispatches.length > 0 ||
     Boolean(pendingBroadcast) ||
     Object.entries(gates).some(
-      ([gateId, status]) => status === "required" && gateId !== "public-alert-gate",
+      ([gateId, status]) =>
+        status === "required" &&
+        gateId !== "public-alert-gate" &&
+        gateId !== "emergency-dispatch-gate",
     );
   const hasDaytonaOutput = Object.values(tools).includes("done");
   const mapTarget = useMemo(
@@ -446,6 +665,7 @@ export default function CrisisGridRuntime() {
     cameraSignals.length > 0 ? "Verify visible ground truth before escalation" : null,
     hasMap ? "Compile operational map surface" : null,
     hasGate ? "Request human approval for public advisory" : null,
+    activeEmergencyDispatches.length > 0 ? "Approve or stop mock emergency-service contact" : null,
   ].filter(Boolean) as string[];
 
   if (!bootHoldComplete || !started || !hasAnyRuntimeEvent) {
@@ -522,6 +742,7 @@ export default function CrisisGridRuntime() {
           ) : null}
 
           <ProtocolTray eventCount={events.length} />
+          <OperatorVoiceControl onCommand={handleVoiceCommand} />
         </section>
 
         <aside
@@ -809,6 +1030,151 @@ function ProtocolTray({
   );
 }
 
+function OperatorVoiceControl({
+  onCommand,
+}: {
+  onCommand: (transcript: string) => Promise<string>;
+}) {
+  const [state, setState] = useState<"idle" | "listening" | "processing">("idle");
+  const [transcript, setTranscript] = useState("");
+  const [response, setResponse] = useState("Push to talk with CrisisGrid");
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+
+  function speak(text: string) {
+    if (!("speechSynthesis" in window)) {
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "es-CL";
+    utterance.rate = 0.98;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function submitTranscript(nextTranscript: string) {
+    const trimmedTranscript = nextTranscript.trim();
+    if (!trimmedTranscript) {
+      setState("idle");
+      return;
+    }
+
+    setTranscript(trimmedTranscript);
+    setState("processing");
+
+    try {
+      const spokenResponse = await onCommand(trimmedTranscript);
+      setResponse(spokenResponse);
+      speak(spokenResponse);
+    } catch {
+      const fallback = "No pude procesar la instruccion de voz. Mantengo el runtime activo.";
+      setResponse(fallback);
+      speak(fallback);
+    } finally {
+      setState("idle");
+    }
+  }
+
+  function startListening() {
+    if (state !== "idle") {
+      recognitionRef.current?.stop();
+      setState("idle");
+      return;
+    }
+
+    const speechWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    const SpeechRecognition =
+      speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      const typedCommand = window.prompt("Instruccion de operador para CrisisGrid");
+      if (typedCommand) {
+        void submitTranscript(typedCommand);
+      }
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "es-CL";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const finalTranscript = event.results[0]?.[0]?.transcript ?? "";
+      void submitTranscript(finalTranscript);
+    };
+    recognition.onerror = () => {
+      setResponse("No pude escuchar la instruccion. Intenta de nuevo.");
+      setState("idle");
+    };
+    recognition.onend = () => {
+      setState((current) => (current === "listening" ? "idle" : current));
+    };
+
+    recognitionRef.current = recognition;
+    setResponse("Escuchando instruccion del operador...");
+    setState("listening");
+    recognition.start();
+  }
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 28,
+        bottom: 24,
+        zIndex: 19,
+        display: "grid",
+        gridTemplateColumns: "auto minmax(0, 1fr)",
+        alignItems: "center",
+        gap: 10,
+        width: "min(510px, calc(100vw - 56px))",
+        border: `1px solid ${state === "listening" ? C.green : "rgba(30,167,255,0.28)"}`,
+        borderRadius: 11,
+        background: "rgba(1,5,9,0.76)",
+        boxShadow: "0 18px 60px rgba(0,0,0,0.34)",
+        backdropFilter: "blur(18px)",
+        padding: 10,
+      }}
+    >
+      <button
+        type="button"
+        onClick={startListening}
+        style={{
+          width: 42,
+          height: 42,
+          display: "grid",
+          placeItems: "center",
+          border: `1px solid ${state === "listening" ? C.green : C.blue}`,
+          borderRadius: 10,
+          background: state === "listening" ? "rgba(16,255,133,0.14)" : "rgba(30,167,255,0.12)",
+          color: C.text,
+          cursor: "pointer",
+          boxShadow: state === "listening" ? "0 0 28px rgba(16,255,133,0.22)" : "none",
+        }}
+        aria-label="Operator voice command"
+      >
+        {state === "processing" ? <Volume2 size={18} /> : <Mic size={18} />}
+      </button>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ color: state === "listening" ? C.green : C.blue, fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>
+          Gemini operator voice
+        </div>
+        <div style={{ marginTop: 4, color: C.text, fontSize: 12, lineHeight: 1.35 }}>
+          {response}
+        </div>
+        {transcript ? (
+          <div style={{ marginTop: 3, color: C.muted, fontSize: 11, lineHeight: 1.35 }}>
+            &quot;{transcript}&quot;
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function XBroadcastGate({
   component,
   onAuthorize,
@@ -1032,6 +1398,7 @@ function shouldDockComponent(type: UiComponent["type"]) {
     "action_plan_board",
     "public_alert_draft",
     "civic_gate",
+    "emergency_dispatch_panel",
     "tool_creation_panel",
   ].includes(type);
 }
@@ -1210,6 +1577,24 @@ function buildComponentsFromToolResult(result: ToolRunResponse): UiComponent[] {
     ];
   }
 
+  if (result.toolName === "contact_emergency_services_mock") {
+    return [
+      {
+        type: "public_alert_draft",
+        props: {
+          channel: `${String(result.output.service ?? "Emergency service")} mock contact`,
+          message:
+            `${String(result.output.status ?? "contacted_mock")} / ${String(
+              result.output.ticketId ?? "svc-mock",
+            )}: ${String(
+              result.output.message ??
+                "Mock emergency-service contact artifact returned. No real call was made.",
+            )}`,
+        },
+      },
+    ];
+  }
+
   const riskZone = result.output.riskZone as
     | { center?: [number, number]; radiusMeters?: number; severity?: "critical"; reason?: string }
     | undefined;
@@ -1281,6 +1666,10 @@ function buildLayersFromToolResult(
         },
       },
     ];
+  }
+
+  if (result.toolName === "contact_emergency_services_mock") {
+    return [];
   }
 
   return [

@@ -8,6 +8,7 @@ import {
   GitBranch,
   ListChecks,
   MapPinned,
+  PhoneCall,
   RadioTower,
   Route,
   Send,
@@ -43,6 +44,7 @@ const visibleGeneratedTypes = new Set<UiComponent["type"]>([
   "action_plan_board",
   "public_alert_draft",
   "civic_gate",
+  "emergency_dispatch_panel",
   "agent_trace_timeline",
   "tool_creation_panel",
 ]);
@@ -351,6 +353,85 @@ function GeneratedSurfaceCard({
         </SurfaceFrame>
       );
 
+    case "emergency_dispatch_panel":
+      return (
+        <SurfaceFrame
+          icon={<PhoneCall size={17} />}
+          title="EmergencyDispatch"
+          source="gatekeeper_agent"
+          accent={C.red}
+        >
+          <div
+            style={{
+              border: `1px solid rgba(255,77,79,0.28)`,
+              borderRadius: 8,
+              background: "rgba(255,77,79,0.07)",
+              padding: 10,
+            }}
+          >
+            <SurfaceTitle>{component.props.service}</SurfaceTitle>
+            <SurfaceText>{component.props.reason}</SurfaceText>
+            <MetaRow
+              left={component.props.location}
+              right={`mock / ${component.props.priority}`}
+            />
+          </div>
+          <div
+            style={{
+              marginTop: 10,
+              color: C.amber,
+              fontSize: 11,
+              fontWeight: 850,
+              lineHeight: 1.45,
+              textTransform: "uppercase",
+            }}
+          >
+            Demo mode: no real call, dispatch, SMS, radio or institutional API.
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 8,
+              marginTop: 12,
+            }}
+          >
+            <button
+              onClick={() => onRejectGate?.(component.props.actionId)}
+              style={{
+                height: 38,
+                border: `1px solid rgba(255,255,255,0.18)`,
+                borderRadius: 7,
+                background: "rgba(255,255,255,0.045)",
+                color: "#d7dde6",
+                cursor: "pointer",
+                fontWeight: 800,
+                textTransform: "uppercase",
+                fontSize: 11,
+              }}
+            >
+              No autorizar
+            </button>
+            <button
+              onClick={() => onApproveGate?.(component.props.actionId)}
+              style={{
+                height: 38,
+                border: `1px solid ${C.red}`,
+                borderRadius: 7,
+                background: "rgba(255,77,79,0.13)",
+                color: C.text,
+                cursor: "pointer",
+                fontWeight: 800,
+                textTransform: "uppercase",
+                fontSize: 11,
+              }}
+            >
+              {component.props.approvalLabel}
+            </button>
+          </div>
+        </SurfaceFrame>
+      );
+
     case "contradiction_panel":
       return (
         <SurfaceFrame
@@ -483,6 +564,7 @@ function orderGeneratedComponents(
       generated_map_surface: 4,
     },
     approval: {
+      emergency_dispatch_panel: 0,
       civic_gate: 0,
       action_plan_board: 1,
       public_alert_draft: 2,

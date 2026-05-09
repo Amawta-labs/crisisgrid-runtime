@@ -61,7 +61,9 @@ export function toA2UIMessages(components: UiComponent[], eventCount: number) {
             componentTypes.length > 0
               ? `Generated components: ${componentTypes.join(", ")}`
               : "Waiting for the UI Planner to add components.",
-          gate: componentTypes.includes("civic_gate")
+          gate:
+            componentTypes.includes("civic_gate") ||
+            componentTypes.includes("emergency_dispatch_panel")
             ? "Human approval gate is active."
             : "No public-action gate active yet.",
         },

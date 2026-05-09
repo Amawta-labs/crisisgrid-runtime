@@ -78,6 +78,13 @@ export const crisisComponentBank: ComponentBankItem[] = [
     requiredProps: ["title", "risk", "actionId", "approvalLabel"],
   },
   {
+    type: "emergency_dispatch_panel",
+    surface: "decision",
+    purpose: "Require HITL approval before a mock emergency-service contact artifact is generated.",
+    useWhen: "The agent wants to contact or stage SAMU, Bomberos, Carabineros or SENAPRED in demo mode.",
+    requiredProps: ["service", "reason", "location", "priority", "actionId", "approvalLabel"],
+  },
+  {
     type: "agent_trace_timeline",
     surface: "trace",
     purpose: "Show the agent handoff and reasoning timeline.",

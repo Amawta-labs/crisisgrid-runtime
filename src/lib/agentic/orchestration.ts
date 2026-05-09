@@ -142,6 +142,18 @@ export function buildVitacuraEarthquakeOrchestration(
       approvalLabel: "Authorize X post",
     },
   };
+  const emergencyDispatchPanel: UiComponent = {
+    type: "emergency_dispatch_panel",
+    props: {
+      service: "Bomberos",
+      reason:
+        "Camera and sensor evidence indicate debris and blocked access near the Vitacura-Costanera corridor; request staged response verification only.",
+      location: "Vitacura-Costanera corridor, Región Metropolitana",
+      priority: "high",
+      actionId: "dispatch-bomberos-vitacura-mock",
+      approvalLabel: "Authorize mock contact",
+    },
+  };
 
   return {
     scenario,
@@ -342,6 +354,24 @@ export function buildVitacuraEarthquakeOrchestration(
         timestamp,
         agentId: "gatekeeper_agent",
         component: publicBroadcastPanel,
+      }),
+      scheduled(9620, {
+        id: "evt-emergency-dispatch-required",
+        type: "gate.required",
+        timestamp,
+        agentId: "gatekeeper_agent",
+        gateId: "emergency-dispatch-gate",
+        title: "Authorize mock emergency-service contact",
+        risk:
+          "Contacting or dispatching emergency services is operationally sensitive and requires explicit human approval. Demo mode only.",
+        actionId: emergencyDispatchPanel.props.actionId,
+      }),
+      scheduled(9820, {
+        id: "evt-emergency-dispatch-panel",
+        type: "ui.component.added",
+        timestamp,
+        agentId: "gatekeeper_agent",
+        component: emergencyDispatchPanel,
       }),
       afterApproval(600, {
         id: "evt-followup-camera-handoff",
