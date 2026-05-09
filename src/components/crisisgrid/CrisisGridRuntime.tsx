@@ -7,7 +7,7 @@ import { BadgeCheck, BrainCircuit, Eye, Mic, RadioTower, Satellite, Send, Volume
 import type { OrchestrationPlan } from "@/lib/agentic/orchestration";
 import { crisisAgents, getCrisisAgent } from "@/lib/agentic/agents";
 import type { UiComponent } from "@/lib/crisis/schemas";
-import type { MapLayer, RuntimeEvent } from "@/lib/runtime/events";
+import type { AgentId, MapLayer, RuntimeEvent } from "@/lib/runtime/events";
 import { useCrisisStore } from "@/store/crisis-store";
 
 import { MapCanvas, type MapTarget, type OperatorMapTarget } from "./components/MapCanvas";
@@ -60,6 +60,7 @@ type OperatorScenario = {
 };
 type OperatorScenarioTemplate = Omit<OperatorScenario, "events"> & {
   timeline: string[];
+  generatedComponents?: UiComponent[];
   signals: Array<{
     source: "camera" | "radio" | "citizen" | "traffic" | "sensor" | "social";
     text: string;
@@ -131,6 +132,34 @@ const operatorMapTargets: OperatorMapTarget[] = [
     source: "operator_directive",
     center: [-70.6331, -33.4179],
     radiusMeters: 2100,
+  },
+  {
+    id: "wildfire-valparaiso",
+    label: "Valparaiso wildfire",
+    source: "operator_directive",
+    center: [-71.6127, -33.0472],
+    radiusMeters: 2800,
+  },
+  {
+    id: "volcano-villarrica",
+    label: "Villarrica volcano",
+    source: "operator_directive",
+    center: [-71.9399, -39.4203],
+    radiusMeters: 5200,
+  },
+  {
+    id: "mudflow-maipo",
+    label: "Cajon del Maipo aluvion",
+    source: "operator_directive",
+    center: [-70.3509, -33.5994],
+    radiusMeters: 3600,
+  },
+  {
+    id: "blackout-santiago",
+    label: "Santiago blackout",
+    source: "operator_directive",
+    center: [-70.6693, -33.4489],
+    radiusMeters: 3000,
   },
 ];
 
@@ -273,11 +302,7 @@ export default function CrisisGridRuntime() {
       agentId: "gatekeeper_agent",
       component: {
         type: "public_alert_draft",
-        props: {
-          channel: "SENAPRED / municipal advisory",
-          message:
-            "Precautionary advisory: avoid the Vitacura-Costanera corridor while inspection teams verify seismic impact. Keep routes clear for emergency vehicles.",
-        },
+        props: getApprovedGateDraft(actionId),
       },
     });
 
@@ -465,6 +490,14 @@ export default function CrisisGridRuntime() {
   }
 
   function requestMapNavigation(target: OperatorMapTarget) {
+    timersRef.current.forEach((timer) => window.clearTimeout(timer));
+    timersRef.current = [];
+    actionQueueRef.current = [];
+    reset();
+    setDismissedBroadcastIds(new Set());
+    setHandledGateActionIds(new Set());
+    setActionStatusOverrides({});
+
     const timestamp = new Date().toISOString();
     const toolId = `navigate-map-${target.id}`;
     const event: Extract<RuntimeEvent, { type: "tool.started" }> = {
@@ -490,14 +523,17 @@ export default function CrisisGridRuntime() {
     window.setTimeout(() => {
       dispatch({
         id: `evt-${toolId}-map-updated`,
-        type: "ui.component.updated",
+        type: "ui.component.added",
         timestamp: new Date().toISOString(),
         agentId: "orchestrator",
-        componentType: "generated_map_surface",
-        patch: {
-          center: target.center,
-          radiusMeters: target.radiusMeters,
-          label: `${target.label} - operator-directed camera move`,
+        component: {
+          type: "generated_map_surface",
+          props: {
+            center: target.center,
+            radiusMeters: target.radiusMeters,
+            severity: target.id === "wildfire-valparaiso" || target.id === "mudflow-maipo" ? "critical" : "high",
+            label: `${target.label} - operator-directed camera move`,
+          },
         },
       });
     }, 260);
@@ -524,7 +560,7 @@ export default function CrisisGridRuntime() {
             id: nextRuntimeEventId(`evt-${template.id}-signal`),
             type: "signal.received",
             timestamp: new Date().toISOString(),
-            agentId: target.id === "shoa-valparaiso" ? "public_api_sensor_agent" : "orchestrator",
+            agentId: resolveOperatorScenarioAgent(target),
             signal: {
               id: nextRuntimeEventId(`${template.id}-signal`),
               ...signal,
@@ -556,6 +592,20 @@ export default function CrisisGridRuntime() {
     }, 980);
 
     timersRef.current.push(traceTimer);
+
+    template.generatedComponents?.forEach((component, index) => {
+      const componentTimer = window.setTimeout(() => {
+        dispatch({
+          id: nextRuntimeEventId(`evt-${template.id}-${component.type}`),
+          type: "ui.component.added",
+          timestamp: new Date().toISOString(),
+          agentId: "ui_planner_agent",
+          component,
+        });
+      }, 1320 + index * 420);
+
+      timersRef.current.push(componentTimer);
+    });
   }
 
   async function handleVoiceCommand(transcript: string) {
@@ -1638,6 +1688,51 @@ function shouldDockComponent(type: UiComponent["type"]) {
   ].includes(type);
 }
 
+function resolveOperatorScenarioAgent(target: OperatorMapTarget): AgentId {
+  if (target.id === "shoa-valparaiso") {
+    return "public_api_sensor_agent";
+  }
+
+  if (
+    target.id === "conaf-metropolitano" ||
+    target.id === "wildfire-valparaiso" ||
+    target.id === "volcano-villarrica" ||
+    target.id === "mudflow-maipo"
+  ) {
+    return "disaster_physics_agent";
+  }
+
+  if (target.id === "blackout-santiago") {
+    return "orchestrator";
+  }
+
+  return "camera_agent";
+}
+
+function getApprovedGateDraft(actionId: string): Extract<UiComponent, { type: "public_alert_draft" }>["props"] {
+  if (actionId === "hold-valparaiso-evacuation-copy") {
+    return {
+      channel: "SHOA / municipal watch",
+      message:
+        "Operator confirmed coastal watch mode for Valparaiso. CrisisGrid continues monitoring SHOA-style thresholds, port cameras and evacuation-route congestion without issuing evacuation wording.",
+    };
+  }
+
+  if (actionId === "approve-maipo-evacuation-watch") {
+    return {
+      channel: "SENAPRED / Maipo basin watch",
+      message:
+        "Evacuation watch approved for Cajon del Maipo. Keep Camino al Volcan clear, avoid bridge approaches and wait for official instructions before moving.",
+    };
+  }
+
+  return {
+    channel: "SENAPRED / municipal advisory",
+    message:
+      "Precautionary advisory: avoid the Vitacura-Costanera corridor while inspection teams verify seismic impact. Keep routes clear for emergency vehicles.",
+  };
+}
+
 function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenarioTemplate {
   if (target.id === "shoa-valparaiso") {
     return {
@@ -1656,6 +1751,35 @@ function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenari
         "Port and coastal cameras are prioritized over Vitacura corridor feeds.",
         "UI Planner prepares coastal route, port access and public watch surfaces.",
         "Gatekeeper holds evacuation copy until institutional threshold changes.",
+      ],
+      generatedComponents: [
+        {
+          type: "route_planner_panel",
+          props: {
+            routes: [
+              { id: "valpo-av-errazuriz", label: "Av. Errazuriz coastal exit", status: "restricted", etaMinutes: 11 },
+              { id: "valpo-avenida-argentina", label: "Avenida Argentina inland route", status: "open", etaMinutes: 8 },
+              { id: "valpo-port-access", label: "Port access perimeter", status: "unknown" },
+            ],
+          },
+        },
+        {
+          type: "public_alert_draft",
+          props: {
+            channel: "SHOA / municipal watch draft",
+            message:
+              "Monitoreo preventivo en borde costero de Valparaiso. No hay orden de evacuacion; mantente atento a canales oficiales y despeja accesos portuarios.",
+          },
+        },
+        {
+          type: "civic_gate",
+          props: {
+            title: "Hold coastal evacuation wording",
+            risk: "Evacuation language can trigger unnecessary movement unless SHOA threshold or camera evidence changes.",
+            actionId: "hold-valparaiso-evacuation-copy",
+            approvalLabel: "Confirm watch mode",
+          },
+        },
       ],
       signals: [
         {
@@ -1704,6 +1828,28 @@ function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenari
         "Camera agent reprioritizes smoke-facing cameras near Pedro de Valdivia Norte.",
         "Gatekeeper prepares emergency-service contact gate without real dispatch.",
       ],
+      generatedComponents: [
+        {
+          type: "risk_zone_layer",
+          props: {
+            center: target.center,
+            radiusMeters: 2100,
+            severity: "high",
+            reason: "Hill-interface wildfire watch: wind drift can push smoke toward dense residential streets.",
+          },
+        },
+        {
+          type: "emergency_dispatch_panel",
+          props: {
+            service: "Bomberos",
+            reason: "Prepare mock contact for smoke verification and hill-access staging near Cerro San Cristobal.",
+            location: "Pedro de Valdivia Norte / Cerro San Cristobal",
+            priority: "high",
+            actionId: "dispatch-bomberos-san-cristobal-mock",
+            approvalLabel: "Authorize mock contact",
+          },
+        },
+      ],
       signals: [
         {
           source: "sensor",
@@ -1728,6 +1874,323 @@ function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenari
           text: "Ops channel suggests staging a mock Bomberos contact pending visual confirmation.",
           confidence: 0.66,
           location: "Metropolitan response net",
+        },
+      ],
+    };
+  }
+
+  if (target.id === "wildfire-valparaiso") {
+    return {
+      id: "wildfire-valparaiso",
+      title: "Valparaiso wildfire interface compiled",
+      subtitle:
+        "The operator selected a hill-interface fire. CrisisGrid switches from seismic verification into wind, route and evacuation staging.",
+      location: "Valparaiso hills / Camino La Polvora",
+      severity: "critical",
+      accent: C.orange,
+      agent: "disaster_physics_agent",
+      recommendation:
+        "Prioritize wind-driven spread, keep road closures visible and require operator approval before mock Bomberos contact or public guidance.",
+      timeline: [
+        "CONAF/NASA adapter flags a thermal anomaly near the hill interface.",
+        "Open-Meteo wind pull changes the risk envelope toward inhabited slopes.",
+        "Social Signal Agent detects repeated smoke reports and route questions.",
+        "UI Planner replaces the seismic surface with fire perimeter, routes and dispatch gate.",
+      ],
+      generatedComponents: [
+        {
+          type: "risk_zone_layer",
+          props: {
+            center: target.center,
+            radiusMeters: 2800,
+            severity: "critical",
+            reason: "Wind-driven fire envelope: hill terrain can push smoke and flame fronts toward evacuation corridors.",
+          },
+        },
+        {
+          type: "route_planner_panel",
+          props: {
+            routes: [
+              { id: "valpo-la-polvora", label: "Camino La Polvora", status: "restricted", etaMinutes: 14 },
+              { id: "valpo-agua-santa", label: "Agua Santa evacuation descent", status: "open", etaMinutes: 9 },
+              { id: "valpo-avenida-alemania", label: "Avenida Alemania upper access", status: "unknown" },
+            ],
+          },
+        },
+        {
+          type: "emergency_dispatch_panel",
+          props: {
+            service: "Bomberos",
+            reason: "Mock escalation for hill-interface smoke column and evacuation-route staging in Valparaiso.",
+            location: "Valparaiso hills / Camino La Polvora",
+            priority: "critical",
+            actionId: "dispatch-bomberos-valparaiso-mock",
+            approvalLabel: "Authorize mock contact",
+          },
+        },
+      ],
+      signals: [
+        {
+          source: "sensor",
+          text: "CONAF/NASA-style thermal anomaly detected near Valparaiso hill interface.",
+          confidence: 0.78,
+          location: "Camino La Polvora / Valparaiso",
+        },
+        {
+          source: "sensor",
+          text: "Open-Meteo wind check: gusts increase spread risk toward upper residential slopes.",
+          confidence: 0.72,
+          location: "Valparaiso ridge line",
+        },
+        {
+          source: "social",
+          text: "Repeated citizen posts mention smoke smell and questions about which descent route is open.",
+          confidence: 0.63,
+          location: "Valparaiso social stream",
+        },
+        {
+          source: "traffic",
+          text: "Route planner marks Camino La Polvora as restricted and keeps Agua Santa as primary descent.",
+          confidence: 0.69,
+          location: "Valparaiso access roads",
+        },
+      ],
+    };
+  }
+
+  if (target.id === "volcano-villarrica") {
+    return {
+      id: "volcano-villarrica",
+      title: "Villarrica volcanic watch generated",
+      subtitle:
+        "The operator selected Villarrica. CrisisGrid compiles a volcanic surface: ash dispersion, lake access, respiratory guidance and SENAPRED gate.",
+      location: "Volcan Villarrica / Pucon",
+      severity: "high",
+      accent: C.red,
+      agent: "disaster_physics_agent",
+      recommendation:
+        "Treat this as a watch surface: verify ash evidence, keep respiratory guidance drafted and contact SENAPRED only through the mock approval gate.",
+      timeline: [
+        "SERNAGEOMIN-style tremor signal enters the shared incident state.",
+        "Open-Meteo wind vector is used to orient ash-dispersion risk.",
+        "Camera Agent requests lake-facing and volcano-facing visual checks.",
+        "Gatekeeper prepares SENAPRED mock contact and keeps public instructions gated.",
+      ],
+      generatedComponents: [
+        {
+          type: "risk_zone_layer",
+          props: {
+            center: target.center,
+            radiusMeters: 5200,
+            severity: "high",
+            reason: "Volcanic ash watch: wind direction can shift respiratory and road-risk zones within minutes.",
+          },
+        },
+        {
+          type: "public_alert_draft",
+          props: {
+            channel: "SENAPRED volcanic watch draft",
+            message:
+              "Monitoreo preventivo por actividad volcanica en Villarrica. Evita acercarte al crater, protege vias respiratorias si observas ceniza y sigue canales oficiales.",
+          },
+        },
+        {
+          type: "emergency_dispatch_panel",
+          props: {
+            service: "SENAPRED",
+            reason: "Mock coordination request for volcanic watch, ash-dispersion review and municipal readiness.",
+            location: "Pucon / Volcan Villarrica",
+            priority: "high",
+            actionId: "dispatch-senapred-villarrica-mock",
+            approvalLabel: "Authorize mock contact",
+          },
+        },
+      ],
+      signals: [
+        {
+          source: "sensor",
+          text: "SERNAGEOMIN-style volcanic tremor signal rose above watch baseline.",
+          confidence: 0.74,
+          location: "Volcan Villarrica",
+        },
+        {
+          source: "sensor",
+          text: "Open-Meteo wind vector suggests potential ash drift toward Pucon lakefront.",
+          confidence: 0.67,
+          location: "Pucon / Villarrica basin",
+        },
+        {
+          source: "camera",
+          text: "Volcano-facing visual check requested; available cameras show intermittent cloud cover.",
+          confidence: 0.58,
+          location: "Pucon camera ring",
+        },
+        {
+          source: "citizen",
+          text: "Citizen reports mention light ash smell, unconfirmed and geographically sparse.",
+          confidence: 0.49,
+          location: "Pucon social reports",
+        },
+      ],
+    };
+  }
+
+  if (target.id === "mudflow-maipo") {
+    return {
+      id: "mudflow-maipo",
+      title: "Maipo aluvion surface generated",
+      subtitle:
+        "The operator selected Cajon del Maipo. CrisisGrid changes into rainfall, river-gauge, road-cut and basin-evacuation workflow.",
+      location: "Cajon del Maipo / Rio Maipo",
+      severity: "critical",
+      accent: C.amber,
+      agent: "disaster_physics_agent",
+      recommendation:
+        "Keep basin evacuation watch ready, route MOP and Carabineros to cutoffs, and avoid public movement until gauge/camera evidence confirms the flow.",
+      timeline: [
+        "DMC-style rainfall pulse is merged with river-gauge trend.",
+        "Road agent marks Camino al Volcan and bridge crossings as fragile links.",
+        "Camera Agent searches for water color, debris and road shoulder erosion.",
+        "UI Planner generates basin routes, resource staging and evacuation-watch gate.",
+      ],
+      generatedComponents: [
+        {
+          type: "route_planner_panel",
+          props: {
+            routes: [
+              { id: "maipo-camino-volcan", label: "Camino al Volcan", status: "restricted", etaMinutes: 18 },
+              { id: "maipo-san-gabriel", label: "San Gabriel bridge approach", status: "unknown" },
+              { id: "maipo-las-vertientes", label: "Las Vertientes descent", status: "open", etaMinutes: 12 },
+            ],
+          },
+        },
+        {
+          type: "resource_deployment_panel",
+          props: {
+            resources: [
+              { id: "mop-road-crew", label: "MOP road crew", status: "staging" },
+              { id: "carabineros-cutoff", label: "Carabineros traffic cutoff", status: "staging" },
+              { id: "samu-maipo", label: "SAMU Maipo standby", status: "available" },
+            ],
+          },
+        },
+        {
+          type: "civic_gate",
+          props: {
+            title: "Approve basin evacuation watch",
+            risk: "A basin-wide message can trigger road movement into fragile bridges unless the operator confirms the wording.",
+            actionId: "approve-maipo-evacuation-watch",
+            approvalLabel: "Approve watch",
+          },
+        },
+      ],
+      signals: [
+        {
+          source: "sensor",
+          text: "DMC-style rainfall pulse exceeds Maipo basin watch threshold.",
+          confidence: 0.77,
+          location: "Rio Maipo upper basin",
+        },
+        {
+          source: "traffic",
+          text: "Camino al Volcan shows slowdown and possible shoulder erosion near bridge access.",
+          confidence: 0.66,
+          location: "San Jose de Maipo",
+        },
+        {
+          source: "camera",
+          text: "Camera sweep requested for water color, debris load and visible road obstruction.",
+          confidence: 0.61,
+          location: "San Gabriel bridge approach",
+        },
+        {
+          source: "radio",
+          text: "Field radio requests Carabineros cutoff plan, pending visual confirmation.",
+          confidence: 0.7,
+          location: "Cajon del Maipo response net",
+        },
+      ],
+    };
+  }
+
+  if (target.id === "blackout-santiago") {
+    return {
+      id: "blackout-santiago",
+      title: "Santiago blackout workflow compiled",
+      subtitle:
+        "The operator selected a power outage. CrisisGrid switches into urban continuity: intersections, hospitals, transport disruption and public comms.",
+      location: "Santiago Centro / RM",
+      severity: "medium",
+      accent: C.violet,
+      agent: "orchestrator",
+      recommendation:
+        "Prioritize traffic-light failures and critical facilities. Offer X guidance only after the operator approves autonomous publication.",
+      timeline: [
+        "Grid outage report enters the orchestrator as a non-geological cascading event.",
+        "Traffic Agent marks signalized intersections as operational risk, not structural collapse.",
+        "Social Signal Agent clusters citizen reports of metro delays and dark intersections.",
+        "Gatekeeper offers an autonomous X update with explicit operator approval.",
+      ],
+      generatedComponents: [
+        {
+          type: "action_plan_board",
+          props: {
+            actions: [
+              { id: "verify-substation-blackout", title: "Verify outage footprint with utility feed", owner: "Sensor Agent", status: "running" },
+              { id: "stage-traffic-support", title: "Stage traffic support at dark intersections", owner: "Ops Lead", status: "queued" },
+              { id: "draft-blackout-public-comms", title: "Prepare public mobility advisory", owner: "Civic Comms", status: "done" },
+            ],
+          },
+        },
+        {
+          type: "public_broadcast_panel",
+          props: {
+            channel: "x_twitter",
+            audience: "Santiago Centro",
+            handle: "@CrisisGridCL",
+            message:
+              "Corte de energia reportado en sectores de Santiago Centro. Conduce con precaucion en cruces sin semaforo, evita desplazamientos no esenciales y sigue canales oficiales.",
+            autonomy: "autonomous_after_approval",
+            actionId: "publish-x-blackout-santiago",
+            approvalLabel: "Authorize X post",
+          },
+        },
+        {
+          type: "emergency_dispatch_panel",
+          props: {
+            service: "Carabineros",
+            reason: "Mock coordination request for intersections without traffic lights and pedestrian-risk control.",
+            location: "Santiago Centro",
+            priority: "medium",
+            actionId: "dispatch-carabineros-blackout-mock",
+            approvalLabel: "Authorize mock contact",
+          },
+        },
+      ],
+      signals: [
+        {
+          source: "sensor",
+          text: "Grid-style outage footprint detected across central Santiago feeders.",
+          confidence: 0.73,
+          location: "Santiago Centro",
+        },
+        {
+          source: "traffic",
+          text: "Traffic lights degraded near Alameda and key north-south intersections.",
+          confidence: 0.69,
+          location: "Alameda / Santiago Centro",
+        },
+        {
+          source: "social",
+          text: "Citizen reports cluster around metro delays, dark intersections and elevator stoppages.",
+          confidence: 0.65,
+          location: "Región Metropolitana social stream",
+        },
+        {
+          source: "radio",
+          text: "Hospital backup-power check requested before issuing broad mobility guidance.",
+          confidence: 0.62,
+          location: "RM continuity net",
         },
       ],
     };
