@@ -66,6 +66,7 @@ type OperatorScenarioTemplate = Omit<OperatorScenario, "events"> & {
     text: string;
     confidence: number;
     location: string;
+    cameraAssetId?: string;
   }>;
 };
 type SpeechRecognitionResultEventLike = {
@@ -107,6 +108,26 @@ const cameraAssets: Record<string, { src: string; kind: "image" | "video" }> = {
   },
   "cam-vespucio-tunnel": {
     src: "/camera-feeds/valparaiso.jpg",
+    kind: "image",
+  },
+  "cam-valparaiso-port": {
+    src: "/camera-feeds/valparaiso.jpg",
+    kind: "image",
+  },
+  "cam-san-cristobal-smoke": {
+    src: "/camera-feeds/costanera-norte.jpg",
+    kind: "image",
+  },
+  "cam-valparaiso-wildfire": {
+    src: "/camera-feeds/vina-del-mar.jpg",
+    kind: "image",
+  },
+  "cam-villarrica-volcano": {
+    src: "/camera-feeds/concepcion.jpg",
+    kind: "image",
+  },
+  "cam-maipo-bridge": {
+    src: "/camera-feeds/autopista-central.jpg",
     kind: "image",
   },
 };
@@ -520,7 +541,7 @@ export default function CrisisGridRuntime() {
 
     dispatch(event);
 
-    window.setTimeout(() => {
+    const mapTimer = window.setTimeout(() => {
       dispatch({
         id: `evt-${toolId}-map-updated`,
         type: "ui.component.added",
@@ -538,6 +559,7 @@ export default function CrisisGridRuntime() {
       });
     }, 520);
 
+    timersRef.current.push(mapTimer);
     activateOperatorScenario(target);
     void runDaytonaTool(event);
   }
@@ -556,14 +578,18 @@ export default function CrisisGridRuntime() {
 
         const signal = template.signals[index];
         if (signal) {
+          const { cameraAssetId, ...runtimeSignal } = signal;
           dispatch({
             id: nextRuntimeEventId(`evt-${template.id}-signal`),
             type: "signal.received",
             timestamp: new Date().toISOString(),
             agentId: resolveOperatorScenarioAgent(target),
             signal: {
-              id: nextRuntimeEventId(`${template.id}-signal`),
-              ...signal,
+              id:
+                signal.source === "camera" && cameraAssetId
+                  ? cameraAssetId
+                  : nextRuntimeEventId(`${template.id}-signal`),
+              ...runtimeSignal,
               receivedAt: new Date().toISOString(),
             },
           });
@@ -704,6 +730,7 @@ export default function CrisisGridRuntime() {
   }
 
   const cameraSignals = signals.filter((signal) => signal.source === "camera");
+  const visibleCameraSignals = resolveVisibleCameraSignals(cameraSignals, operatorScenario?.id);
   const hasAnyRuntimeEvent = events.length > 0;
   const hasMap = components.some((component) => component.type === "generated_map_surface") || mapLayers.length > 0;
   const activeCivicGates = components.filter(
@@ -787,7 +814,7 @@ export default function CrisisGridRuntime() {
   }, [events]);
   const activeAgentCount = activeAgents.filter((agent) => agent.status === "active").length;
   const objectives = [
-    cameraSignals.length > 0 ? "Verify visible ground truth before escalation" : null,
+    visibleCameraSignals.length > 0 ? "Verify visible ground truth before escalation" : null,
     hasMap ? "Compile operational map surface" : null,
     hasGate ? "Request human approval for public advisory" : null,
     activeEmergencyDispatches.length > 0 ? "Approve or stop mock emergency-service contact" : null,
@@ -845,12 +872,12 @@ export default function CrisisGridRuntime() {
 
           <SignalContextRail
             signalCount={signals.length}
-            cameraCount={cameraSignals.length}
+            cameraCount={visibleCameraSignals.length}
             latestEvent={latestEvent}
             objectives={objectives}
           />
 
-          {cameraSignals.length > 0 ? (
+          {visibleCameraSignals.length > 0 ? (
             <div
               style={{
                 position: "absolute",
@@ -864,7 +891,7 @@ export default function CrisisGridRuntime() {
                 pointerEvents: "auto",
               }}
             >
-              <VisualVerificationPanel cameraSignals={cameraSignals} compact={hasGate} />
+              <VisualVerificationPanel cameraSignals={visibleCameraSignals} compact={hasGate} />
             </div>
           ) : null}
 
@@ -1674,6 +1701,39 @@ function XBroadcastGate({
   );
 }
 
+function resolveVisibleCameraSignals(
+  cameraSignals: Array<{ id: string; text: string; location: string; confidence: number }>,
+  scenarioId?: string,
+) {
+  if (!scenarioId) {
+    return cameraSignals;
+  }
+
+  const scenarioCameraIds = getScenarioCameraAssetIds(scenarioId);
+
+  if (scenarioCameraIds.length === 0) {
+    return [];
+  }
+
+  const allowedIds = new Set(scenarioCameraIds);
+
+  return cameraSignals.filter((signal) => allowedIds.has(signal.id));
+}
+
+function getScenarioCameraAssetIds(scenarioId: string) {
+  const scenarioCameras: Record<string, string[]> = {
+    "costanera-vitacura": ["cam-vitacura-costanera"],
+    "shoa-valparaiso": ["cam-valparaiso-port"],
+    "conaf-metropolitano": ["cam-san-cristobal-smoke"],
+    "wildfire-valparaiso": ["cam-valparaiso-wildfire"],
+    "volcano-villarrica": ["cam-villarrica-volcano"],
+    "mudflow-maipo": ["cam-maipo-bridge"],
+    "blackout-santiago": [],
+  };
+
+  return scenarioCameras[scenarioId] ?? [];
+}
+
 function shouldDockComponent(type: UiComponent["type"]) {
   return [
     "incident_card",
@@ -1793,6 +1853,7 @@ function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenari
           text: "Port camera sweep requested; no abnormal coastal retreat visible in available feeds.",
           confidence: 0.64,
           location: "Muelle Prat / Valparaiso",
+          cameraAssetId: "cam-valparaiso-port",
         },
         {
           source: "traffic",
@@ -1868,6 +1929,7 @@ function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenari
           text: "Camera verification requested for smoke visibility and access-road obstruction.",
           confidence: 0.63,
           location: "Pedro de Valdivia Norte",
+          cameraAssetId: "cam-san-cristobal-smoke",
         },
         {
           source: "radio",
@@ -1949,6 +2011,13 @@ function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenari
           location: "Valparaiso social stream",
         },
         {
+          source: "camera",
+          text: "Hill-facing camera sweep shows smoke haze near upper Valparaiso access roads.",
+          confidence: 0.61,
+          location: "Valparaiso hill camera ring",
+          cameraAssetId: "cam-valparaiso-wildfire",
+        },
+        {
           source: "traffic",
           text: "Route planner marks Camino La Polvora as restricted and keeps Agua Santa as primary descent.",
           confidence: 0.69,
@@ -2024,6 +2093,7 @@ function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenari
           text: "Volcano-facing visual check requested; available cameras show intermittent cloud cover.",
           confidence: 0.58,
           location: "Pucon camera ring",
+          cameraAssetId: "cam-villarrica-volcano",
         },
         {
           source: "citizen",
@@ -2102,6 +2172,7 @@ function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenari
           text: "Camera sweep requested for water color, debris load and visible road obstruction.",
           confidence: 0.61,
           location: "San Gabriel bridge approach",
+          cameraAssetId: "cam-maipo-bridge",
         },
         {
           source: "radio",
@@ -2225,6 +2296,7 @@ function getOperatorScenarioTemplate(target: OperatorMapTarget): OperatorScenari
         text: "Costanera feed shows congestion and shaking evidence; no visible collapse confirmed.",
         confidence: 0.74,
         location: "Costanera Norte access",
+        cameraAssetId: "cam-vitacura-costanera",
       },
       {
         source: "traffic",
@@ -2334,7 +2406,7 @@ function VisualVerificationPanel({
         }}
       >
         {heroSignal ? (
-          <CameraFeedCard signal={heroSignal} size="hero" />
+          <CameraFeedCard key={heroSignal.id} signal={heroSignal} size="hero" />
         ) : null}
         {!compact && secondarySignals.length > 0 ? (
           <div style={{ display: "grid", gap: 10 }}>
